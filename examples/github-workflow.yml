@@ -1,0 +1,32 @@
+# Copy to .github/workflows/argus.yml in the repository you want to scan.
+name: Argus SAST
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  security-events: write   # upload SARIF to code scanning
+
+jobs:
+  argus:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0     # needed for changed-only on pull requests
+
+      - uses: <you>/argus-sast/action@v1
+        with:
+          provider: anthropic            # anthropic | openai | xai | ollama
+          model: claude-sonnet-5-5
+          fail-on: high
+          changed-only: ${{ github.event_name == 'pull_request' }}
+          rules: .github/argus-rules.yaml   # optional: your custom rules, committed to the repo
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+
+      # Rules-only variant (no LLM, no secrets needed):
+      # - uses: <you>/argus-sast/action@v1
+      #   with: { no-ai: "true", fail-on: high }

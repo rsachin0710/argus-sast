@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% block title %}Rules · Argus{% endblock %}
+{% block content %}
+<div class="page-head"><div>
+  <h1>Rules</h1>
+  <p>Built-in rules plus your own. Custom rules live in <code>{{ rules_dir }}</code> and are used by every scan, from here or the terminal.</p>
+</div>
+<button class="btn primary" id="new-rule-btn" type="button">Add a custom rule</button></div>
+
+{% for e in errors %}<div class="notice error">{{ e }}</div>{% endfor %}
+
+<section class="panel form-narrow" id="rule-editor" hidden>
+  <h2>Add a custom rule</h2>
+  <div class="tabs" role="tablist">
+    <button type="button" role="tab" aria-selected="true" data-tab="form">Form</button>
+    <button type="button" role="tab" aria-selected="false" data-tab="yaml">YAML</button>
+  </div>
+  <form id="rule-form" data-panel="form" novalidate>
+    <div class="grid-2">
+      <div class="field"><label for="r-id">Rule ID</label><input type="text" id="r-id" name="id" placeholder="acme.java.legacy-crypto" required>
+        <p class="hint">Lowercase letters, digits, dots and dashes. Reusing a built-in ID overrides that rule.</p></div>
+      <div class="field"><label for="r-name">Name</label><input type="text" id="r-name" name="name" placeholder="Deprecated LegacyCrypto helper"></div>
+      <div class="field"><label for="r-type">Type</label>
+        <select id="r-type" name="type">
+          <option value="pattern">Pattern: a regex that flags code</option>
+          <option value="ai">AI check: a policy in plain English</option>
+          <option value="sink">Sink: a dangerous call the AI should watch</option>
+          <option value="source">Source: where untrusted input enters</option>
+          <option value="sanitizer">Sanitizer: a function that makes data safe</option>
+        </select></div>
+      <div class="field" data-show="pattern"><label for="r-mode">When it matches</label>
+        <select id="r-mode" name="mode"><option value="report">Report a finding</option><option value="hint">Only hint to the AI</option></select></div>
+      <div class="field"><label for="r-cwe">CWE</label><input type="text" id="r-cwe" name="cwe" placeholder="CWE-327"></div>
+      <div class="field" data-show="pattern ai"><label for="r-sev">Severity</label>
+        <select id="r-sev" name="severity">{% for s in ['critical','high','medium','low','info'] %}<option {% if s == 'medium' %}selected{% endif %}>{{ s }}</option>{% endfor %}</select></div>
+    </div>
+    <div class="field"><label>Languages</label><div class="checks">
+      {% for l in ['java','python','javascript'] %}<label><input type="checkbox" name="languages" value="{{ l }}" checked> {{ {'java':'Java','python':'Python','javascript':'JavaScript'}[l] }}</label>{% endfor %}</div></div>
+    <div class="field" data-show="pattern sink source sanitizer"><label for="r-patterns">Patterns (Python regex, one per line; any match fires)</label>
+      <textarea id="r-patterns" name="patterns" placeholder="LegacyCrypto\.(encrypt|decrypt)\s*\("></textarea></div>
+    <div class="field" data-show="pattern"><label for="r-not">Ignore lines matching <span class="muted">(optional)</span></label>
+      <textarea id="r-not" name="pattern-not" placeholder="//\s*approved-by-security"></textarea></div>
+    <div class="field" data-show="ai" hidden><label for="r-instruction">Instruction for the AI</label>
+      <textarea id="r-instruction" name="instruction" placeholder="Every query on customer data must filter by the tenant id of the authenticated user, never one taken from the request. Flag lookups that do not."></textarea></div>
+    <div class="field"><label for="r-msg">Why it matters</label><input type="text" id="r-msg" name="message" placeholder="LegacyCrypto uses single DES with a static key."></div>
+    <div class="field" data-show="pattern ai"><label for="r-fix">How to fix</label><input type="text" id="r-fix" name="remediation" placeholder="Use CryptoService.encrypt(), which uses AES-GCM with KMS keys."></div>
+    <div class="field"><label for="r-exclude">Skip paths <span class="muted">(globs, one per line)</span></label><textarea id="r-exclude" name="exclude" placeholder="**/test/**"></textarea></div>
+  </form>
+  <div data-panel="yaml" hidden>
+    <div class="field"><label for="r-yaml">Rules file (YAML)</label>
+      <textarea id="r-yaml" rows="16">version: 1
+rules:
+  - id: acme.python.raw-sql
+    name: Acme raw SQL helper
+    type: pattern
+    languages: [python]
+    cwe: CWE-89
+    severity: high
+    patterns: ['acme_db\.run_raw\s*\(']
+    message: run_raw() executes its argument as SQL without parameters.
+    remediation: Use acme_db.query(sql, params) instead.
+</textarea></div>
+    <div class="field"><label for="r-filename">File name</label><input type="text" id="r-filename" placeholder="acme-rules.yaml"></div>
+  </div>
+  <div id="rule-msg" class="notice" hidden></div>
+  <div class="actions">
+    <button class="btn" id="rule-validate" type="button">Check rule</button>
+    <button class="btn primary" id="rule-save" type="button">Save rule</button>
+    <button class="btn" id="rule-close" type="button">Close</button>
+  </div>
+</section>
+
+<div class="filters" role="search">
+  <label class="sr-only" for="rq">Filter rules</label>
+  <input type="search" id="rq" placeholder="Filter by ID, CWE or language">
+  <label class="sr-only" for="rorigin">Origin</label>
+  <select id="rorigin"><option value="">All rules</option><option value="custom">Custom only</option><option value="builtin">Built-in only</option></select>
+</div>
+<div class="table-wrap">
+<table id="rules-table">
+  <thead><tr><th>Rule</th><th>Type</th><th>CWE</th><th>Severity</th><th>Languages</th><th>Source</th><th>On</th><th><span class="sr-only">Actions</span></th></tr></thead>
+  <tbody>
+  {% for r in rules %}
+  <tr data-origin="{{ 'builtin' if r.origin == 'builtin' else 'custom' }}" data-text="{{ (r.id ~ ' ' ~ (r.cwe or '') ~ ' ' ~ r.languages|join(' ') ~ ' ' ~ r.name)|lower }}">
+    <td><b class="mono">{{ r.id }}</b><div class="muted">{{ r.name }}</div></td>
+    <td>{{ r.type }}{% if r.type == 'pattern' %} <span class="muted">({{ r.mode }})</span>{% endif %}</td>
+    <td>{{ r.cwe or '' }}</td>
+    <td>{% if r.type in ['pattern','ai'] %}<span class="sev sev-{{ r.severity }}">{{ r.severity }}</span>{% endif %}</td>
+    <td>{{ r.languages|join(', ') }}</td>
+    <td><span class="tag {% if r.origin != 'builtin' %}custom{% endif %}">{{ r.origin }}</span></td>
+    <td><input type="checkbox" class="rule-toggle" data-id="{{ r.id }}" aria-label="Enable {{ r.id }}" {% if r.enabled %}checked{% endif %}></td>
+    <td>{% if r.origin == 'user' %}<button class="btn small danger rule-delete" type="button" data-id="{{ r.id }}">Delete</button>{% endif %}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endblock %}

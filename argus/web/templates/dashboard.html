@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Scans · Argus{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Scans</h1>
+    <p>Every scan from this machine, from the terminal or this page.</p>
+  </div>
+  <a class="btn primary" href="/scan/new">New scan</a>
+</div>
+
+{% if runs %}
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Target</th><th>Started</th><th>Engine</th><th>Active findings</th><th>Status</th></tr></thead>
+  <tbody>
+  {% for r in runs %}
+    <tr>
+      <td><a href="/runs/{{ r.id }}">{{ r.target | short_target }}</a><div class="path-full">{{ r.target }}</div></td>
+      <td class="muted"><time data-utc="{{ r.created_at }}">{{ r.created_at }}</time></td>
+      <td>{% if r.ai_enabled %}{{ r.provider }}: {{ r.model }}{% else %}<span class="muted">Rules only</span>{% endif %}</td>
+      <td><div class="counts">
+        {% for sev in sev_order %}{% set n = r.counts.by_severity.get(sev, 0) %}
+          <span class="sev sev-{{ sev }} {% if n == 0 %}zero{% endif %}" title="{{ sev }}">{{ n }}<span class="sr-only"> {{ sev }}</span></span>
+        {% endfor %}
+      </div></td>
+      <td><span class="status status-{{ r.status }}">{{ r.status }}</span></td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}
+<div class="panel empty">
+  <h2>No scans yet</h2>
+  <p>Point Argus at a Java, Python or JavaScript file, a folder, or a GitHub repository.</p>
+  <a class="btn primary" href="/scan/new">Start your first scan</a>
+</div>
+{% endif %}
+{% endblock %}

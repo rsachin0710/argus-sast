@@ -1,0 +1,106 @@
+name: Argus SAST
+description: AI-agent SAST for Java, Python and JavaScript; uploads SARIF to GitHub code scanning.
+branding:
+  icon: shield
+  color: blue
+
+inputs:
+  path:
+    description: Folder or file to scan, relative to the repository root.
+    default: "."
+  provider:
+    description: "LLM provider: anthropic, openai, xai or ollama. Leave empty with no-ai: true for rules only."
+    default: anthropic
+  model:
+    description: Model name (defaults to the provider's suggested model).
+    default: ""
+  no-ai:
+    description: Rules only, no LLM calls.
+    default: "false"
+  votes:
+    description: Self-consistency runs per chunk.
+    default: "3"
+  fail-on:
+    description: Fail the job if a finding is at or above this severity (info|low|medium|high|critical). Empty = never fail.
+    default: high
+  changed-only:
+    description: On pull requests, scan only files changed against the base branch (needs fetch-depth 0).
+    default: "false"
+  rules:
+    description: Extra rule files or folders, space separated.
+    default: ""
+  upload-sarif:
+    description: Upload findings.sarif to GitHub code scanning.
+    default: "true"
+  extra-args:
+    description: Any other `argus scan` arguments.
+    default: ""
+
+outputs:
+  report-dir:
+    description: Folder with findings.json, report.txt and findings.sarif.
+    value: ${{ steps.scan.outputs.report-dir }}
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+
+    - name: Install Argus
+      shell: bash
+      run: pip install "${{ github.action_path }}/.."
+
+    - name: Scan
+      id: scan
+      shell: bash
+      env:
+        ARGUS_HOME: ${{ runner.temp }}/argus
+        INPUT_PATH: ${{ inputs.path }}
+        INPUT_PROVIDER: ${{ inputs.provider }}
+        INPUT_MODEL: ${{ inputs.model }}
+        INPUT_NO_AI: ${{ inputs.no-ai }}
+        INPUT_VOTES: ${{ inputs.votes }}
+        INPUT_FAIL_ON: ${{ inputs.fail-on }}
+        INPUT_CHANGED_ONLY: ${{ inputs.changed-only }}
+        INPUT_RULES: ${{ inputs.rules }}
+        INPUT_EXTRA: ${{ inputs.extra-args }}
+        BASE_REF: ${{ github.base_ref }}
+      run: |
+        set -uo pipefail
+        args=(scan "$INPUT_PATH" --format json,txt,sarif --out argus-results --votes "$INPUT_VOTES" --quiet)
+        if [ "$INPUT_NO_AI" = "true" ]; then args+=(--no-ai); else args+=(--provider "$INPUT_PROVIDER"); fi
+        if [ -n "$INPUT_MODEL" ]; then args+=(--model "$INPUT_MODEL"); fi
+        if [ -n "$INPUT_FAIL_ON" ]; then args+=(--fail-on "$INPUT_FAIL_ON"); fi
+        if [ "$INPUT_CHANGED_ONLY" = "true" ] && [ -n "$BASE_REF" ]; then args+=(--since "origin/$BASE_REF"); fi
+        for r in $INPUT_RULES; do args+=(--rules "$r"); done
+        # shellcheck disable=SC2206
+        extra=($INPUT_EXTRA)
+        argus "${args[@]}" "${extra[@]}"
+        code=$?
+        dir=$(ls -dt argus-results/*/ 2>/dev/null | head -1)
+        echo "report-dir=${dir%/}" >> "$GITHUB_OUTPUT"
+        echo "sarif=${dir}findings.sarif" >> "$GITHUB_OUTPUT"
+        echo "exit-code=$code" >> "$GITHUB_OUTPUT"
+        if [ -f "${dir}report.txt" ]; then
+          { echo '### Argus SAST'; echo '```'; head -n 25 "${dir}report.txt"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+        fi
+        exit 0
+
+    - name: Upload SARIF
+      if: ${{ inputs.upload-sarif == 'true' && steps.scan.outputs.sarif != '' }}
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: ${{ steps.scan.outputs.sarif }}
+        category: argus
+
+    - name: Keep reports
+      uses: actions/upload-artifact@v4
+      with:
+        name: argus-results
+        path: argus-results
+
+    - name: Apply fail-on
+      shell: bash
+      run: exit ${{ steps.scan.outputs.exit-code }}

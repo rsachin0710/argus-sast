@@ -1,0 +1,318 @@
+# Built-in Python rules (Django, Flask, FastAPI and the standard library).
+version: 1
+rules:
+  # ---------------- Injection (A05:2025) ----------------
+  - id: argus.python.sqli.format
+    name: SQL query built with string formatting
+    type: pattern
+    languages: [python]
+    cwe: CWE-89
+    severity: high
+    patterns:
+      - '\.(execute|executemany|executescript|raw|extra|text)\s*\(\s*(f["'']|["''][^"'']*["'']\s*(%|\.format\s*\(|\+))'
+      - '\b(text|RawSQL)\s*\(\s*f["'']'
+    message: The SQL text is formatted with values at the call site, so untrusted values can change the query.
+    remediation: Pass values as parameters, e.g. cursor.execute("... WHERE id = %s", (user_id,)).
+
+  - id: argus.python.sqli.string-built
+    name: SQL statement assembled from strings
+    type: pattern
+    languages: [python]
+    cwe: CWE-89
+    severity: medium
+    mode: hint
+    patterns:
+      - 'f["'']\s*(?i:select\s|insert\s+into|update\s+\w+\s+set|delete\s+from)[^"'']*\{'
+      - '["'']\s*(?i:select\s|insert\s+into|update\s+\w+\s+set|delete\s+from)[^"'']*["'']\s*(%|\+|\.format\s*\()'
+    message: SQL text built from pieces; check whether any piece is attacker-controlled.
+
+  - id: argus.python.cmdi.shell-true
+    name: Subprocess with shell=True
+    type: pattern
+    languages: [python]
+    cwe: CWE-78
+    severity: high
+    patterns: ['subprocess\.\w+\s*\([^#]*shell\s*=\s*True']
+    message: The command runs through a shell; any untrusted part of it can inject commands.
+    remediation: Pass an argument list and shell=False; use shlex.quote only as a last resort.
+
+  - id: argus.python.cmdi.os-system
+    name: os.system / os.popen
+    type: pattern
+    languages: [python]
+    cwe: CWE-78
+    severity: high
+    patterns: ['\bos\.(system|popen|popen2|popen3|spawnl|spawnlp|execl|execlp)\s*\(', '\bcommands\.getoutput\s*\(']
+    message: Runs a shell command; dangerous if any part of it is attacker-controlled.
+    remediation: Use subprocess.run([...], shell=False) with a fixed program and validated arguments.
+
+  - id: argus.python.code.eval
+    name: eval / exec
+    type: pattern
+    languages: [python]
+    cwe: CWE-95
+    severity: high
+    patterns: ['(?<![\w.])(eval|exec)\s*\(']
+    pattern-not: ['\b(eval|exec)\s*\(\s*\)']
+    message: Evaluates a string as Python code.
+    remediation: Use ast.literal_eval for literals, or a dispatch table instead of dynamic code.
+
+  - id: argus.python.ssti
+    name: Template rendered from a string
+    type: pattern
+    languages: [python]
+    cwe: CWE-94
+    severity: high
+    mode: hint
+    patterns: ['render_template_string\s*\(', '\bTemplate\s*\(\s*[a-z_]', 'Environment\([^)]*\)\.from_string\s*\(']
+    message: If the template text includes user input, this is server-side template injection.
+
+  - id: argus.python.xss.markup
+    name: Auto-escaping bypassed
+    type: pattern
+    languages: [python]
+    cwe: CWE-79
+    severity: medium
+    mode: hint
+    patterns: ['\bMarkup\s*\(', 'mark_safe\s*\(', '\|\s*safe\b', 'autoescape\s*=\s*False', '\{%\s*autoescape\s+off']
+    message: Escaping is turned off here; the value must not contain user input.
+
+  # ---------------- Access control (A01:2025) ----------------
+  - id: argus.python.path.user-input
+    name: File path built from request data
+    type: pattern
+    languages: [python]
+    cwe: CWE-22
+    severity: high
+    patterns: ['(\bopen|send_file|send_from_directory|FileResponse|os\.path\.join|Path)\s*\([^)]*request\.(args|form|values|GET|POST|query_params|path_params|json)']
+    message: A file path is built directly from request data, allowing ../ traversal.
+    remediation: Use werkzeug.utils.secure_filename / a fixed base directory and verify the resolved path stays inside it.
+
+  - id: argus.python.path.sink
+    name: File access
+    type: sink
+    languages: [python]
+    cwe: CWE-22
+    patterns: ['\bopen\s*\(', 'send_file\s*\(', 'send_from_directory\s*\(', 'FileResponse\s*\(', 'shutil\.(copy|move|rmtree)\s*\(', 'os\.(remove|unlink)\s*\(']
+    message: Reads, writes or deletes a file.
+
+  - id: argus.python.ssrf.sink
+    name: Outbound HTTP request
+    type: sink
+    languages: [python]
+    cwe: CWE-918
+    patterns: ['requests\.(get|post|put|delete|head|patch|request)\s*\(', 'urlopen\s*\(', 'httpx\.(get|post|put|delete|request|Client|AsyncClient)\b', 'aiohttp\.ClientSession', 'urllib3\.PoolManager']
+    message: Makes a server-side network request.
+
+  - id: argus.python.redirect.user-input
+    name: Redirect to a request-supplied URL
+    type: pattern
+    languages: [python]
+    cwe: CWE-601
+    severity: medium
+    patterns: ['(redirect|HttpResponseRedirect|RedirectResponse)\s*\(\s*request\.']
+    message: The redirect target comes straight from the request (open redirect).
+    remediation: Only redirect to relative paths or an allowlist of hosts (url_has_allowed_host_and_scheme).
+
+  - id: argus.python.csrf-exempt
+    name: CSRF protection disabled
+    type: pattern
+    languages: [python]
+    cwe: CWE-352
+    severity: medium
+    patterns: ['@csrf_exempt', 'WTF_CSRF_ENABLED\s*=\s*False', 'csrf\.exempt']
+    message: CSRF protection is disabled for this view.
+    remediation: Keep CSRF protection for cookie-authenticated, state-changing views.
+
+  - id: argus.python.chmod-world
+    name: World-writable permissions
+    type: pattern
+    languages: [python]
+    cwe: CWE-732
+    severity: medium
+    patterns: ['os\.chmod\s*\([^)]*0o?[0-7]?[0-7][0-7][2367]\b', 'os\.chmod\s*\([^)]*stat\.S_IWOTH']
+    message: The file becomes writable by every local user.
+    remediation: Use the narrowest permissions needed (e.g. 0o600 / 0o640).
+
+  # ---------------- Misconfiguration (A02:2025) ----------------
+  - id: argus.python.debug-enabled
+    name: Debug mode enabled
+    type: pattern
+    languages: [python]
+    cwe: CWE-489
+    severity: medium
+    patterns: ['\.run\s*\([^)]*debug\s*=\s*True', '^\s*DEBUG\s*=\s*True\b']
+    message: Debug mode exposes an interactive debugger / detailed errors (remote code execution in Flask/Werkzeug).
+    remediation: Read debug flags from the environment and default them to False.
+
+  - id: argus.python.xxe.lxml
+    name: lxml parser resolving entities
+    type: pattern
+    languages: [python]
+    cwe: CWE-611
+    severity: high
+    patterns: ['XMLParser\s*\([^)]*resolve_entities\s*=\s*True', 'XMLParser\s*\([^)]*no_network\s*=\s*False']
+    message: External entities are resolved, enabling XXE (file disclosure / SSRF).
+    remediation: Use defusedxml, or lxml with resolve_entities=False and no_network=True.
+
+  - id: argus.python.xml.stdlib
+    name: Standard-library XML parsing
+    type: pattern
+    languages: [python]
+    cwe: CWE-776
+    severity: low
+    mode: hint
+    patterns: ['^\s*(from|import)\s+xml\.(etree|dom|sax)', 'xml\.sax\.make_parser\s*\(']
+    message: The stdlib XML parsers are vulnerable to entity-expansion (billion laughs) on untrusted input; prefer defusedxml.
+
+  # ---------------- Cryptography (A04:2025) ----------------
+  - id: argus.python.crypto.weak-hash
+    name: Weak hash algorithm
+    type: pattern
+    languages: [python]
+    cwe: CWE-328
+    severity: medium
+    patterns: ['hashlib\.(md5|sha1)\s*\(', 'hashlib\.new\s*\(\s*["''](md5|sha1)["'']']
+    pattern-not: ['usedforsecurity\s*=\s*False']
+    message: MD5/SHA-1 are broken for security purposes.
+    remediation: Use hashlib.sha256 for integrity; use bcrypt/argon2/hashlib.scrypt/pbkdf2_hmac for passwords.
+
+  - id: argus.python.crypto.weak-cipher
+    name: Weak cipher or ECB mode
+    type: pattern
+    languages: [python]
+    cwe: CWE-327
+    severity: high
+    patterns: ['\b(DES|DES3|ARC4|ARC2|Blowfish)\.new\s*\(', 'MODE_ECB', 'algorithms\.(TripleDES|ARC4|Blowfish|IDEA)\s*\(', 'modes\.ECB\s*\(']
+    message: Weak cipher or ECB mode.
+    remediation: Use AES-GCM (cryptography.hazmat.primitives.ciphers.aead.AESGCM) with a random nonce.
+
+  - id: argus.python.random.insecure
+    name: Non-cryptographic random
+    type: pattern
+    languages: [python]
+    cwe: CWE-330
+    severity: low
+    mode: hint
+    patterns: ['\brandom\.(random|randint|choice|choices|randrange|getrandbits|sample|uniform)\s*\(']
+    message: The random module is predictable; use the secrets module for tokens, ids and passwords.
+
+  - id: argus.python.tempfile.mktemp
+    name: Insecure temporary file
+    type: pattern
+    languages: [python]
+    cwe: CWE-377
+    severity: medium
+    patterns: ['tempfile\.mktemp\s*\(']
+    message: mktemp() is race-prone; another process can create the file first.
+    remediation: Use tempfile.NamedTemporaryFile or tempfile.mkstemp.
+
+  # ---------------- Authentication (A07:2025) ----------------
+  - id: argus.python.tls.verify-disabled
+    name: TLS certificate verification disabled
+    type: pattern
+    languages: [python]
+    cwe: CWE-295
+    severity: high
+    patterns: ['verify\s*=\s*False', 'ssl\._create_unverified_context', 'CERT_NONE', 'check_hostname\s*=\s*False']
+    message: Certificates are not verified, enabling man-in-the-middle attacks.
+    remediation: Keep verification on; pass a CA bundle path if you use a private CA.
+
+  - id: argus.python.jwt.unverified
+    name: JWT signature not verified
+    type: pattern
+    languages: [python]
+    cwe: CWE-347
+    severity: high
+    patterns: ['["'']verify_signature["'']\s*:\s*False', 'algorithms\s*=\s*\[[^\]]*["'']none["'']', 'jwt\.decode\s*\([^)]*verify\s*=\s*False']
+    message: Token claims are trusted without checking the signature.
+    remediation: Call jwt.decode(token, key, algorithms=["HS256"]) (or your real algorithm) with verification on.
+
+  - id: argus.python.flask-secret
+    name: Hard-coded framework secret key
+    type: pattern
+    languages: [python]
+    cwe: CWE-798
+    severity: medium
+    patterns: ['(SECRET_KEY|secret_key)\s*=\s*["''][^"'']{4,}["'']', 'config\[["'']SECRET_KEY["'']\]\s*=\s*["'']']
+    pattern-not: ['os\.environ|getenv']
+    message: With the secret key, anyone can forge sessions and signed cookies.
+    remediation: Load SECRET_KEY from the environment or a secrets manager.
+
+  # ---------------- Integrity (A08:2025) ----------------
+  - id: argus.python.deser.pickle
+    name: Unsafe deserialization (pickle family)
+    type: pattern
+    languages: [python]
+    cwe: CWE-502
+    severity: high
+    patterns: ['\b(pickle|cPickle|_pickle|dill|shelve|jsonpickle|joblib)\.(loads?|Unpickler|open|decode)\s*\(', 'pd\.read_pickle\s*\(', 'torch\.load\s*\((?![^)]*weights_only\s*=\s*True)']
+    message: Unpickling untrusted data executes arbitrary code.
+    remediation: Use JSON (or another data-only format) for untrusted input.
+
+  - id: argus.python.deser.yaml
+    name: yaml.load without a safe loader
+    type: pattern
+    languages: [python]
+    cwe: CWE-502
+    severity: high
+    patterns: ['yaml\.(load|load_all|unsafe_load|full_load)\s*\(']
+    pattern-not: ['Loader\s*=\s*(yaml\.)?(Safe|CSafe|Base)Loader']
+    message: yaml.load with the default/full loader can construct arbitrary Python objects.
+    remediation: Use yaml.safe_load().
+
+  - id: argus.python.deser.marshal
+    name: marshal deserialization
+    type: pattern
+    languages: [python]
+    cwe: CWE-502
+    severity: medium
+    mode: hint
+    patterns: ['marshal\.loads?\s*\(']
+    message: marshal is not safe for untrusted data.
+
+  # ---------------- Logging, errors, design ----------------
+  - id: argus.python.log.sensitive
+    name: Sensitive value logged
+    type: pattern
+    languages: [python]
+    cwe: CWE-532
+    severity: medium
+    mode: hint
+    patterns: ['(log|logger|logging)\.(info|debug|warning|error|critical|exception)\s*\(.*(?i:password|passwd|secret|token|api_key|apikey|ssn|card_number)']
+    message: Secrets or personal data may end up in logs.
+
+  - id: argus.python.assert-security
+    name: assert used for a security check
+    type: pattern
+    languages: [python]
+    cwe: CWE-703
+    severity: medium
+    mode: hint
+    patterns: ['^\s*assert\s+.*\b(is_admin|is_authenticated|is_staff|is_superuser|has_perm|permission|authorized|role)\b']
+    message: assert statements are removed with python -O, silently disabling this check.
+
+  - id: argus.python.error.traceback
+    name: Traceback / exception text returned
+    type: pattern
+    languages: [python]
+    cwe: CWE-209
+    severity: low
+    mode: hint
+    patterns: ['traceback\.format_exc\s*\(', 'return\s+.*str\s*\(\s*(e|exc|err|ex)\s*\)']
+    message: Check that exception details are not returned to clients.
+
+  # ---------------- Taint markers ----------------
+  - id: argus.python.source.request
+    name: Untrusted HTTP / CLI input
+    type: source
+    languages: [python]
+    patterns: ['request\.(args|form|values|json|data|files|cookies|headers|get_json|GET|POST|body|FILES|META|query_params|path_params|stream)\b', '\binput\s*\(', 'sys\.argv', 'websocket\.receive']
+    message: Attacker-controlled data enters here.
+
+  - id: argus.python.sanitizer.common
+    name: Common encoders / safe APIs
+    type: sanitizer
+    languages: [python]
+    patterns: ['\bescape\s*\(', 'bleach\.clean\s*\(', 'shlex\.quote\s*\(', 'secure_filename\s*\(', 'url_has_allowed_host_and_scheme\s*\(', 'yaml\.safe_load\s*\(', 'ast\.literal_eval\s*\(', 'defusedxml']
+    message: Output is encoded / validated here.

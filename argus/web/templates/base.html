@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="argus-csrf" content="{{ csrf }}">
+  <title>{% block title %}Argus{% endblock %}</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body data-page="{{ active }}">
+  <nav class="rail" aria-label="Main">
+    <a class="brand" href="/">
+      <svg width="26" height="26" viewBox="0 0 26 26" aria-hidden="true"><rect x="1" y="1" width="24" height="24" rx="6" fill="none" stroke="currentColor" stroke-width="2"/><rect x="5" y="9" width="16" height="4" rx="1" fill="#fff1b8" stroke="#b0234a" stroke-width="1.5"/><path d="M5 17h10M5 5h12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      <b>Argus</b>
+    </a>
+    <a class="nav" href="/" {% if active == 'dashboard' or active == 'run' %}aria-current="page"{% endif %}>Scans</a>
+    <a class="nav" href="/scan/new" {% if active == 'new_scan' %}aria-current="page"{% endif %}>New scan</a>
+    <a class="nav" href="/context" {% if active == 'context' %}aria-current="page"{% endif %}>Questions for you</a>
+    <a class="nav" href="/rules" {% if active == 'rules' %}aria-current="page"{% endif %}>Rules</a>
+    <a class="nav" href="/settings" {% if active == 'settings' %}aria-current="page"{% endif %}>Settings</a>
+    <p class="foot">v{{ version }}<br>{{ settings.llm.provider.value }}: {{ settings.llm.model }}</p>
+  </nav>
+  <main id="main">
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

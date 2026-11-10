@@ -1,0 +1,77 @@
+# Built-in rules that apply to every supported language.
+# Same format as custom rules: copy any of these into ~/.config/argus/rules/
+# and change it, or redefine its `id` there to override it.
+version: 1
+rules:
+  - id: argus.common.private-key
+    name: Private key embedded in source
+    type: pattern
+    cwe: CWE-321
+    severity: high
+    confidence: 0.95
+    include_comments: true
+    verify: false
+    patterns: ['-----BEGIN (RSA |EC |DSA |OPENSSH |PGP |ENCRYPTED )?PRIVATE KEY-----']
+    message: A private key is committed to the code base; anyone with read access to the repo can use it.
+    remediation: Remove the key, rotate it, and load it at runtime from a secrets manager or a file outside the repo.
+    references: ['https://cwe.mitre.org/data/definitions/321.html']
+
+  - id: argus.common.cloud-token
+    name: Cloud or SaaS access token in source
+    type: pattern
+    cwe: CWE-798
+    severity: high
+    confidence: 0.9
+    include_comments: true
+    verify: false
+    patterns:
+      - '\b(AKIA|ASIA)[0-9A-Z]{16}\b'
+      - '\bgh[pousr]_[A-Za-z0-9]{36,}\b'
+      - '\bxox[baprs]-[A-Za-z0-9-]{10,}'
+      - '\bsk_live_[0-9a-zA-Z]{24,}'
+      - '\bAIza[0-9A-Za-z_\-]{35}\b'
+    message: A live-looking access token (AWS, GitHub, Slack, Stripe or Google) is hard-coded.
+    remediation: Revoke the token, then read it from an environment variable or secrets manager.
+
+  - id: argus.common.hardcoded-secret
+    name: Hard-coded password or secret
+    type: pattern
+    cwe: CWE-798
+    severity: medium
+    confidence: 0.6
+    case_sensitive: false
+    patterns:
+      - '\b\w*?(password|passwd|pwd|secret|secret_key|api[_-]?key|access[_-]?token|auth[_-]?token|client[_-]?secret)\b["'']?\s*[:=]\s*["''][^"''\s]{6,}["'']'
+    pattern-not:
+      - '["''](changeme|change_me|password|passw0rd|xxx+|\*+|<[^>]*>|\$\{[^}]*\}|your[_-][^"'']*|example[^"'']*|dummy[^"'']*|test[^"'']*|redacted|placeholder)["'']'
+      - 'os\.environ|getenv|process\.env|System\.getenv|config\[|settings\.'
+    message: A credential appears to be hard-coded in source.
+    remediation: Load the secret from the environment or a secrets manager; never commit real credentials.
+
+  - id: argus.common.cleartext-http-url
+    name: Cleartext http:// endpoint
+    type: pattern
+    cwe: CWE-319
+    severity: low
+    mode: hint
+    patterns: ['["''`]http://(?!localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]|schemas\.|www\.w3\.org|example\.|xml\.|java\.sun\.com|maven\.apache\.org)']
+    message: Data sent to this URL travels unencrypted.
+
+  - id: argus.common.llm-directed-text
+    name: Text that addresses an AI reviewer (possible prompt injection)
+    type: pattern
+    cwe: CWE-1427
+    severity: info
+    confidence: 0.8
+    case_sensitive: false
+    include_comments: true
+    verify: false
+    patterns:
+      - 'ignore (all |any )?(the )?(previous|prior|above|earlier) (instructions|prompts?)'
+      - '\b(ai|llm|gpt|claude|security)[ -](reviewer|scanner|assistant|model|auditor)s?\b.{0,60}\b(ignore|skip|do not (report|flag)|report nothing|mark (this|it) as safe|is safe)'
+      - '\byou are (an? )?(ai|assistant|language model|llm)\b'
+    message: >-
+      This text appears to give instructions to an AI code reviewer. Argus treats
+      code as data, but this can be an attempt to make AI tools miss real issues
+      in this file; review the surrounding code manually.
+    remediation: Remove the text, and review this file without relying on AI-only results.

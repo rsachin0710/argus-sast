@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Questions for you · Argus{% endblock %}
+{% block content %}
+<div class="page-head"><div>
+  <h1>Questions for you</h1>
+  <p>Lines where the verdict depends on something the code does not show. Answer, and Argus re-checks the finding with your answer and remembers it for future scans.</p>
+</div></div>
+
+{% if items %}
+  {% for it in items %}{% set f = it.f %}
+  <section class="panel ask-card" data-run="{{ it.run }}" data-id="{{ f.id }}">
+    <div class="run-meta">
+      <span class="sev sev-{{ f.severity }}">{{ f.severity }}</span>
+      <span><b>{{ f.title }}</b></span>
+      <span class="mono">{{ f.file }}:{{ f.start_line }}</span>
+      <span>{{ f.cwe }}</span>
+      <a href="/runs/{{ it.run }}#{{ f.id }}">Open in scan</a>
+    </div>
+    <pre class="code"><code>{{ f.start_line }} | {{ f.snippet }}</code></pre>
+    <p><b>{{ f.context_question }}</b></p>
+    <label for="ans-{{ loop.index }}" class="sr-only">Your answer</label>
+    <textarea id="ans-{{ loop.index }}" class="answer" placeholder="e.g. This endpoint is only reachable through the internal VPN gateway."></textarea>
+    <div class="actions"><button class="btn primary send-answer" type="button">Send answer and re-check</button><span class="result" aria-live="polite"></span></div>
+  </section>
+  <p></p>
+  {% endfor %}
+{% else %}
+<div class="panel empty"><h2>No open questions</h2><p>When the AI cannot decide without context from you, the question appears here.</p></div>
+{% endif %}
+{% endblock %}

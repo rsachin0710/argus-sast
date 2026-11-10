@@ -1,0 +1,22 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+dist/
+build/
+.venv/
+argus-results/
+*.argus-bak
+
+# Secrets / local state - never commit
+.env
+.env.*
+*.pem
+*.key
+*.p12
+credentials.toml
+.argus/
+.DS_Store
+.idea/
+.vscode/

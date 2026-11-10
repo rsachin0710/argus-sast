@@ -1,0 +1,274 @@
+# Built-in Java rules. `report` rules become findings (verified by the AI when
+# enabled); `hint`, source, sink and sanitizer rules steer the AI agents.
+version: 1
+rules:
+  # ---------------- Injection (A05:2025) ----------------
+  - id: argus.java.sqli.concat
+    name: SQL query built by string concatenation
+    type: pattern
+    languages: [java]
+    cwe: CWE-89
+    severity: high
+    patterns:
+      - '\.(executeQuery|executeUpdate|execute|prepareStatement|addBatch|createQuery|createNativeQuery|createSQLQuery|queryForList|queryForObject|update)\s*\(\s*("[^"]*"\s*\+|[A-Za-z_][\w.]*\s*\+\s*")'
+    message: The SQL text is assembled from strings at the call site, so untrusted values can change the query.
+    remediation: Use a PreparedStatement / named parameters (setString, :param) instead of concatenation.
+
+  - id: argus.java.sqli.string-built
+    name: SQL statement assembled from strings
+    type: pattern
+    languages: [java]
+    cwe: CWE-89
+    severity: medium
+    mode: hint
+    patterns:
+      - '"\s*(?i:select\s|insert\s+into|update\s+\w+\s+set|delete\s+from)[^"]*"\s*\+'
+      - 'String\.format\s*\(\s*"\s*(?i:select|insert|update|delete)\b'
+    message: SQL text built from pieces; check whether any piece is attacker-controlled.
+
+  - id: argus.java.cmdi.exec-concat
+    name: OS command built from strings
+    type: pattern
+    languages: [java]
+    cwe: CWE-78
+    severity: high
+    patterns: ['\.exec\s*\([^;]*\+', 'new\s+ProcessBuilder\s*\([^;]*\+']
+    message: The command line is concatenated, so untrusted input can inject shell arguments or commands.
+    remediation: Pass a fixed command and an argument array; validate inputs against an allowlist.
+
+  - id: argus.java.cmdi.sink
+    name: Process execution
+    type: sink
+    languages: [java]
+    cwe: CWE-78
+    patterns: ['Runtime\.getRuntime\(\)\.exec\s*\(', 'new\s+ProcessBuilder\s*\(']
+    message: Starts an OS process.
+
+  - id: argus.java.spel.sink
+    name: Expression language evaluation
+    type: sink
+    languages: [java]
+    cwe: CWE-917
+    patterns: ['SpelExpressionParser', '\.parseExpression\s*\(', 'OgnlUtil|Ognl\.getValue', 'ELProcessor|createValueExpression']
+    message: Evaluates an expression language string.
+
+  - id: argus.java.ldap.sink
+    name: LDAP search
+    type: sink
+    languages: [java]
+    cwe: CWE-90
+    patterns: ['\b(DirContext|InitialDirContext|LdapContext)\b.*\.search\s*\(', 'ldapTemplate\.search\s*\(']
+    message: Runs an LDAP query.
+
+  - id: argus.java.xpath.sink
+    name: XPath evaluation
+    type: sink
+    languages: [java]
+    cwe: CWE-643
+    patterns: ['xpath\.(evaluate|compile)\s*\(', 'XPathFactory\.newInstance']
+    message: Evaluates an XPath expression.
+
+  - id: argus.java.reflection
+    name: Class loaded by name
+    type: pattern
+    languages: [java]
+    cwe: CWE-470
+    severity: medium
+    mode: hint
+    patterns: ['Class\.forName\s*\(\s*[^")]']
+    message: If the class name comes from input, an attacker may instantiate arbitrary classes.
+
+  - id: argus.java.xss.writer
+    name: Raw output to the HTTP response
+    type: sink
+    languages: [java]
+    cwe: CWE-79
+    patterns: ['getWriter\(\)\.(print|println|write|append)\s*\(', 'getOutputStream\(\)\.(print|println|write)\s*\(']
+    message: Writes directly to the HTTP response body.
+
+  # ---------------- Access control (A01:2025) ----------------
+  - id: argus.java.path.sink
+    name: File system access
+    type: sink
+    languages: [java]
+    cwe: CWE-22
+    patterns: ['new\s+File(InputStream|OutputStream|Reader|Writer)?\s*\(', 'Paths\.get\s*\(', 'Path\.of\s*\(', 'Files\.(read\w*|write\w*|new\w+|delete\w*|copy|move)\s*\(']
+    message: Opens or modifies a file path.
+
+  - id: argus.java.ssrf.sink
+    name: Outbound HTTP request
+    type: sink
+    languages: [java]
+    cwe: CWE-918
+    patterns: ['new\s+URL\s*\(', '\.openConnection\s*\(', 'restTemplate\.\w+\s*\(', 'WebClient\.', 'HttpRequest\.newBuilder', 'HttpClients?\.']
+    message: Makes a server-side network request.
+
+  - id: argus.java.redirect.sink
+    name: HTTP redirect
+    type: sink
+    languages: [java]
+    cwe: CWE-601
+    patterns: ['\.sendRedirect\s*\(', '"redirect:"\s*\+']
+    message: Redirects the browser.
+
+  - id: argus.java.csrf-disabled
+    name: CSRF protection disabled
+    type: pattern
+    languages: [java]
+    cwe: CWE-352
+    severity: medium
+    patterns: ['csrf\(\)\s*\.disable\(\)', 'csrf\s*\(\s*\w+\s*->\s*\w+\.disable\(\)\s*\)', 'csrf\s*\(\s*AbstractHttpConfigurer::disable\s*\)']
+    message: Spring Security CSRF protection is turned off; this is only safe for stateless, token-authenticated APIs.
+    remediation: Keep CSRF enabled for cookie/session-authenticated endpoints.
+
+  # ---------------- Misconfiguration (A02:2025) ----------------
+  - id: argus.java.xxe.parser
+    name: XML parser without XXE hardening
+    type: pattern
+    languages: [java]
+    cwe: CWE-611
+    severity: high
+    scope: file
+    patterns: ['(DocumentBuilderFactory|SAXParserFactory|XMLInputFactory|TransformerFactory|SchemaFactory|SAXReader|SAXBuilder)\.?(newInstance|newFactory)?\s*\(']
+    pattern-not: ['disallow-doctype-decl', 'FEATURE_SECURE_PROCESSING', 'IS_SUPPORTING_EXTERNAL_ENTITIES', 'external-general-entities', 'ACCESS_EXTERNAL_DTD', 'setExpandEntityReferences\s*\(\s*false']
+    message: An XML parser is created and no XXE protection feature is set anywhere in this file.
+    remediation: 'Call factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true) before parsing.'
+
+  - id: argus.java.cors.any-origin
+    name: CORS allows any origin
+    type: pattern
+    languages: [java]
+    cwe: CWE-942
+    severity: medium
+    patterns: ['allowedOrigins\s*\(\s*"\*"', 'addAllowedOrigin\s*\(\s*"\*"', '@CrossOrigin\s*$', '@CrossOrigin\s*\(\s*(origins\s*=\s*|value\s*=\s*)?"\*"', 'allowedOriginPatterns\s*\(\s*"\*"']
+    message: Any website can make cross-origin requests to this endpoint.
+    remediation: List the exact trusted origins.
+
+  - id: argus.java.cookie
+    name: Cookie created
+    type: pattern
+    languages: [java]
+    cwe: CWE-614
+    severity: low
+    mode: hint
+    patterns: ['new\s+Cookie\s*\(']
+    message: Check Secure, HttpOnly and SameSite on session/auth cookies.
+
+  # ---------------- Cryptography (A04:2025) ----------------
+  - id: argus.java.crypto.weak-hash
+    name: Weak hash algorithm
+    type: pattern
+    languages: [java]
+    cwe: CWE-328
+    severity: medium
+    patterns: ['MessageDigest\.getInstance\s*\(\s*"(?i:MD2|MD4|MD5|SHA-?1)"', 'DigestUtils\.(md5|sha1|md5Hex|sha1Hex)\s*\(']
+    message: MD5/SHA-1 are broken for security purposes (collisions; fast to brute-force for passwords).
+    remediation: Use SHA-256+ for integrity, and bcrypt/scrypt/Argon2/PBKDF2 for passwords.
+
+  - id: argus.java.crypto.weak-cipher
+    name: Weak cipher or ECB mode
+    type: pattern
+    languages: [java]
+    cwe: CWE-327
+    severity: high
+    patterns: ['Cipher\.getInstance\s*\(\s*"((?i:DES|DESede|RC2|RC4|ARCFOUR|Blowfish)\b[^"]*|AES|[^"]*/ECB/[^"]*)"']
+    message: DES/3DES/RC4/Blowfish are weak, and AES without a mode defaults to ECB, which leaks patterns.
+    remediation: Use AES/GCM/NoPadding with a random 12-byte IV per message.
+
+  - id: argus.java.random.insecure
+    name: Non-cryptographic random
+    type: pattern
+    languages: [java]
+    cwe: CWE-330
+    severity: low
+    mode: hint
+    patterns: ['new\s+(java\.util\.)?Random\s*\(', 'Math\.random\s*\(']
+    message: java.util.Random is predictable; it must not create tokens, ids, passwords or keys.
+
+  # ---------------- Authentication (A07:2025) ----------------
+  - id: argus.java.tls.hostname-any
+    name: TLS hostname verification disabled
+    type: pattern
+    languages: [java]
+    cwe: CWE-295
+    severity: high
+    patterns: ['ALLOW_ALL_HOSTNAME_VERIFIER', 'NoopHostnameVerifier', 'setHostnameVerifier\s*\(\s*\([^)]*\)\s*->\s*true', 'verify\s*\(\s*String\s+\w+\s*,\s*SSLSession\s+\w+\s*\)\s*\{\s*return\s+true']
+    message: Any certificate hostname is accepted, enabling man-in-the-middle attacks.
+    remediation: Use the default HostnameVerifier.
+
+  - id: argus.java.tls.trust-manager
+    name: Custom TrustManager
+    type: pattern
+    languages: [java]
+    cwe: CWE-295
+    severity: high
+    mode: hint
+    patterns: ['implements\s+X509TrustManager', 'new\s+X509TrustManager\s*\(', 'checkServerTrusted\s*\([^)]*\)\s*(throws\s+\w+\s*)?\{\s*\}']
+    message: Custom trust managers often accept every certificate.
+
+  - id: argus.java.jwt.decode
+    name: JWT decoded
+    type: pattern
+    languages: [java]
+    cwe: CWE-347
+    severity: medium
+    mode: hint
+    patterns: ['JWT\.decode\s*\(', 'Jwts\.parser\s*\(', 'parseUnsecuredClaims|parseClaimsJwt\s*\(']
+    message: Check that the signature is verified before trusting the claims.
+
+  # ---------------- Integrity (A08:2025) ----------------
+  - id: argus.java.deser.objectinputstream
+    name: Java native deserialization
+    type: pattern
+    languages: [java]
+    cwe: CWE-502
+    severity: high
+    patterns: ['new\s+ObjectInputStream\s*\(', 'new\s+XMLDecoder\s*\(', 'XStream\s*\(\s*\)', 'enableDefaultTyping\s*\(', 'activateDefaultTyping\s*\(']
+    message: Deserializing untrusted data with these APIs can lead to remote code execution via gadget chains.
+    remediation: Avoid native serialization for untrusted data; use JSON with explicit types, or an ObjectInputFilter allowlist.
+
+  - id: argus.java.mass-assignment
+    name: Request body bound to an entity
+    type: pattern
+    languages: [java]
+    cwe: CWE-915
+    severity: medium
+    mode: hint
+    patterns: ['@RequestBody\s+(@Valid\s+)?\w*(Entity|User|Account|Customer|Order)\b']
+    message: Binding requests directly to entities lets callers set fields like role or owner.
+
+  # ---------------- Logging & errors (A09/A10:2025) ----------------
+  - id: argus.java.log.sensitive
+    name: Sensitive value logged
+    type: pattern
+    languages: [java]
+    cwe: CWE-532
+    severity: medium
+    mode: hint
+    patterns: ['(log|logger|LOG|LOGGER)\.(info|debug|warn|error|trace)\s*\(.*(?i:password|passwd|secret|token|apikey|api_key|ssn|creditcard|card_number)']
+    message: Secrets or personal data may end up in logs.
+
+  - id: argus.java.error.stacktrace
+    name: Stack trace printed
+    type: pattern
+    languages: [java]
+    cwe: CWE-209
+    severity: low
+    mode: hint
+    patterns: ['\.printStackTrace\s*\(', 'getStackTrace\s*\(']
+    message: Check that stack traces are not returned to clients.
+
+  # ---------------- Taint markers ----------------
+  - id: argus.java.source.request
+    name: Untrusted HTTP input
+    type: source
+    languages: [java]
+    patterns: ['@(RequestParam|PathVariable|RequestBody|RequestHeader|CookieValue|ModelAttribute)\b', '\.get(Parameter|ParameterValues|ParameterMap|Header|Headers|QueryString|Cookies|InputStream|Reader|RequestURI|PathInfo)\s*\(']
+    message: Attacker-controlled data enters here.
+
+  - id: argus.java.sanitizer.common
+    name: Common encoders / safe APIs
+    type: sanitizer
+    languages: [java]
+    patterns: ['ESAPI\.encoder\(\)', 'Encode\.for(Html|HtmlAttribute|JavaScript|UriComponent)', 'HtmlUtils\.htmlEscape', 'StringEscapeUtils\.escape(Html4|Html|Xml)', '\.set(String|Int|Long|Object)\s*\(\s*\d+\s*,', 'FilenameUtils\.getName\s*\(', '\.normalize\(\)\.startsWith\s*\(']
+    message: Output is encoded / parameterised here.

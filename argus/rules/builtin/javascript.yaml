@@ -1,0 +1,299 @@
+# Built-in JavaScript rules (Node.js / Express and browser code).
+version: 1
+rules:
+  # ---------------- Injection (A05:2025) ----------------
+  - id: argus.javascript.code.eval
+    name: eval / Function / vm on strings
+    type: pattern
+    languages: [javascript]
+    cwe: CWE-95
+    severity: high
+    patterns: ['(?<![\w.$])eval\s*\(', 'new\s+Function\s*\(', '\bset(Timeout|Interval)\s*\(\s*["''`]', 'vm\.(runInNewContext|runInThisContext|runInContext|compileFunction)\s*\(', 'new\s+vm\.Script\s*\(']
+    message: Evaluates a string as code.
+    remediation: Avoid dynamic code; use JSON.parse for data and a lookup table for behaviour.
+
+  - id: argus.javascript.cmdi.exec-dynamic
+    name: Shell command built from strings
+    type: pattern
+    languages: [javascript]
+    cwe: CWE-78
+    severity: high
+    patterns: ['\bexec(Sync)?\s*\(\s*(`[^`]*\$\{|["''][^"'']*["'']\s*\+|[A-Za-z_$][\w$.]*\s*\+)', '\bspawn(Sync)?\s*\([^)]*shell\s*:\s*true']
+    message: The command line is assembled from strings and run through a shell.
+    remediation: Use execFile/spawn with an argument array and shell:false; validate inputs against an allowlist.
+
+  - id: argus.javascript.cmdi.sink
+    name: child_process
+    type: sink
+    languages: [javascript]
+    cwe: CWE-78
+    patterns: ['require\(\s*["'']child_process["'']\s*\)', 'from\s+["'']child_process["'']', '\bexecFile(Sync)?\s*\(']
+    message: Starts an OS process.
+
+  - id: argus.javascript.sqli.concat
+    name: SQL query built by concatenation or template literal
+    type: pattern
+    languages: [javascript]
+    cwe: CWE-89
+    severity: high
+    patterns: ['\.(query|execute|raw|unsafe)\s*\(\s*(`[^`]*\$\{|["''][^"'']*["'']\s*\+)']
+    pattern-not: ['\.query\s*\(\s*`[^`]*\$\{[^}]*\}[^`]*`\s*,\s*\[']
+    message: Values are interpolated into the SQL text instead of being passed as parameters.
+    remediation: 'Use placeholders: db.query("SELECT * FROM users WHERE id = $1", [id]).'
+
+  - id: argus.javascript.nosqli
+    name: NoSQL query from request data
+    type: pattern
+    languages: [javascript]
+    cwe: CWE-943
+    severity: high
+    patterns: ['\$where', '\.(find|findOne|findOneAndUpdate|updateOne|deleteOne|deleteMany|countDocuments)\s*\(\s*req\.(body|query|params)']
+    message: Request objects passed straight into a MongoDB query allow operator injection ($ne, $gt, $where).
+    remediation: Build the query from validated scalar fields, or use mongo-sanitize / express-mongo-sanitize.
+
+  - id: argus.javascript.xss.dom
+    name: HTML injection sink
+    type: pattern
+    languages: [javascript]
+    cwe: CWE-79
+    severity: medium
+    patterns: ['\.(innerHTML|outerHTML)\s*\+?=(?!=)', 'insertAdjacentHTML\s*\(', 'document\.write(ln)?\s*\(', 'dangerouslySetInnerHTML', '\$\([^)]*\)\.(html|append|prepend|after|before)\s*\(\s*[^)''"]']
+    message: Writes HTML into the page; untrusted data here is cross-site scripting.
+    remediation: Use textContent / React text nodes, or sanitise with DOMPurify.sanitize().
+
+  - id: argus.javascript.xss.response
+    name: HTML response built from strings
+    type: pattern
+    languages: [javascript]
+    cwe: CWE-79
+    severity: medium
+    patterns: ['res\.(send|write|end)\s*\(\s*(`[^`]*<[^`]*\$\{|["''][^"'']*<[^"'']*["'']\s*\+)']
+    message: HTML is built from strings and sent to the browser without encoding.
+    remediation: Use a template engine with auto-escaping, or escape every interpolated value.
+
+  - id: argus.javascript.redos
+    name: Regular expression built from input
+    type: pattern
+    languages: [javascript]
+    cwe: CWE-1333
+    severity: medium
+    patterns: ['new\s+RegExp\s*\(\s*req\.']
+    message: A user-supplied regex can take exponential time (ReDoS) or match unintended input.
+    remediation: Escape user input before building a RegExp, or avoid dynamic regexes.
+
+  # ---------------- Access control (A01:2025) ----------------
+  - id: argus.javascript.path.user-input
+    name: File path built from request data
+    type: pattern
+    languages: [javascript]
+    cwe: CWE-22
+    severity: high
+    patterns: ['(fs\.\w+|res\.sendFile|res\.download|path\.(join|resolve))\s*\([^)]*req\.(params|query|body)']
+    message: A file path is built directly from request data, allowing ../ traversal.
+    remediation: Resolve against a fixed base dir and check the result still starts with it; prefer an id-to-file map.
+
+  - id: argus.javascript.path.sink
+    name: File system access
+    type: sink
+    languages: [javascript]
+    cwe: CWE-22
+    patterns: ['fs\.(readFile|readFileSync|createReadStream|writeFile|writeFileSync|createWriteStream|unlink|unlinkSync|rm|rmSync)\s*\(', 'res\.(sendFile|download)\s*\(']
+    message: Reads, writes or deletes a file.
+
+  - id: argus.javascript.ssrf.user-input
+    name: Server request to a request-supplied URL
+    type: pattern
+    languages: [javascript]
+    cwe: CWE-918
+    severity: high
+    patterns: ['\b(axios(\.\w+)?|fetch|got(\.\w+)?|needle|superagent(\.\w+)?|https?\.(get|request))\s*\(\s*[^)''"`]*req\.(query|body|params)']
+    message: The server fetches a URL controlled by the caller (SSRF).
+    remediation: Allowlist hosts/schemes, resolve DNS and block internal address ranges.
+
+  - id: argus.javascript.ssrf.sink
+    name: Outbound HTTP request
+    type: sink
+    languages: [javascript]
+    cwe: CWE-918
+    patterns: ['\baxios(\.\w+)?\s*\(', '(?<![\w.])fetch\s*\(', '\bgot(\.\w+)?\s*\(', 'https?\.(get|request)\s*\(']
+    message: Makes a network request.
+
+  - id: argus.javascript.redirect.user-input
+    name: Redirect to a request-supplied URL
+    type: pattern
+    languages: [javascript]
+    cwe: CWE-601
+    severity: medium
+    patterns: ['res\.redirect\s*\([^)]*req\.(query|body|params)', '(window\.)?location(\.href)?\s*=\s*[^=;]*(location\.(hash|search)|URLSearchParams)']
+    message: The redirect target comes from the request (open redirect).
+    remediation: Redirect only to relative paths or an allowlist of hosts.
+
+  # ---------------- Misconfiguration (A02:2025) ----------------
+  - id: argus.javascript.cors.any-origin
+    name: CORS allows any origin
+    type: pattern
+    languages: [javascript]
+    cwe: CWE-942
+    severity: medium
+    patterns: ['\bcors\s*\(\s*\)', 'origin\s*:\s*(["'']\*["'']|true)\b', 'Access-Control-Allow-Origin["'']\s*,\s*["'']\*']
+    message: Any website can make cross-origin requests to this server.
+    remediation: 'Configure cors({ origin: ["https://app.example.com"] }).'
+
+  - id: argus.javascript.cookie.httponly-off
+    name: Cookie without HttpOnly
+    type: pattern
+    languages: [javascript]
+    cwe: CWE-1004
+    severity: medium
+    patterns: ['httpOnly\s*:\s*false']
+    message: JavaScript can read this cookie, so XSS can steal it.
+    remediation: Set httpOnly true for session and auth cookies.
+
+  - id: argus.javascript.cookie.secure-off
+    name: Cookie without Secure
+    type: pattern
+    languages: [javascript]
+    cwe: CWE-614
+    severity: medium
+    patterns: ['secure\s*:\s*false']
+    message: The cookie can be sent over plain HTTP.
+    remediation: Set secure true (and sameSite) for session and auth cookies.
+
+  # ---------------- Cryptography (A04:2025) ----------------
+  - id: argus.javascript.crypto.weak-hash
+    name: Weak hash algorithm
+    type: pattern
+    languages: [javascript]
+    cwe: CWE-328
+    severity: medium
+    patterns: ['createHash\s*\(\s*["''](md4|md5|sha1)["'']']
+    message: MD5/SHA-1 are broken for security purposes.
+    remediation: Use sha256+ for integrity; bcrypt/argon2/scrypt for passwords.
+
+  - id: argus.javascript.crypto.weak-cipher
+    name: Weak cipher, ECB mode or deprecated createCipher
+    type: pattern
+    languages: [javascript]
+    cwe: CWE-327
+    severity: high
+    patterns: ['createCipher(iv)?\s*\(\s*["''](des|des-ede|des-ede3|des3|rc4|rc2|bf|blowfish|aes-\d+-ecb|des-ecb)', '\.createCipher\s*\(', '\.createDecipher\s*\(']
+    message: Weak algorithm, ECB mode, or the deprecated createCipher (no IV, weak key derivation).
+    remediation: Use crypto.createCipheriv("aes-256-gcm", key, randomIv).
+
+  - id: argus.javascript.random.insecure
+    name: Math.random
+    type: pattern
+    languages: [javascript]
+    cwe: CWE-330
+    severity: low
+    mode: hint
+    patterns: ['Math\.random\s*\(']
+    message: Math.random is predictable; use crypto.randomBytes / crypto.randomUUID for tokens.
+
+  # ---------------- Authentication (A07:2025) ----------------
+  - id: argus.javascript.tls.reject-unauthorized
+    name: TLS certificate verification disabled
+    type: pattern
+    languages: [javascript]
+    cwe: CWE-295
+    severity: high
+    patterns: ['rejectUnauthorized\s*:\s*false', 'NODE_TLS_REJECT_UNAUTHORIZED["'']?\s*\]?\s*=\s*["'']?0']
+    message: Certificates are not verified, enabling man-in-the-middle attacks.
+    remediation: Remove the override; trust a private CA with the `ca` option instead.
+
+  - id: argus.javascript.jwt.weak
+    name: JWT accepted without proper verification
+    type: pattern
+    languages: [javascript]
+    cwe: CWE-347
+    severity: high
+    patterns: ['algorithms\s*:\s*\[[^\]]*["'']none["'']', 'ignoreExpiration\s*:\s*true']
+    message: The token check accepts unsigned or expired tokens.
+    remediation: Pin algorithms (e.g. ["HS256"]) and keep expiry checks.
+
+  - id: argus.javascript.jwt.decode
+    name: jwt.decode
+    type: pattern
+    languages: [javascript]
+    cwe: CWE-347
+    severity: medium
+    mode: hint
+    patterns: ['jwt\.decode\s*\(']
+    message: jwt.decode does not verify the signature; make sure jwt.verify is used before trusting claims.
+
+  # ---------------- Integrity (A08:2025) ----------------
+  - id: argus.javascript.deser.unsafe
+    name: Unsafe deserialization
+    type: pattern
+    languages: [javascript]
+    cwe: CWE-502
+    severity: high
+    patterns: ['require\(\s*["'']node-serialize["'']\s*\)', '\.unserialize\s*\(', 'funcster', 'serialize-to-js.*deserialize']
+    message: These libraries can execute code embedded in the serialized data.
+    remediation: Use JSON.parse and validate the result against a schema.
+
+  - id: argus.javascript.prototype-pollution
+    name: Possible prototype pollution
+    type: pattern
+    languages: [javascript]
+    cwe: CWE-1321
+    severity: medium
+    mode: hint
+    patterns: ['__proto__', 'Object\.assign\s*\(\s*\{\}\s*,\s*req\.', '_\.(merge|defaultsDeep|set)\s*\(\s*[^,]+,\s*req\.', '\.extend\s*\(\s*true']
+    message: Deep-merging user objects can overwrite Object.prototype.
+
+  - id: argus.javascript.mass-assignment
+    name: Request body passed to a model
+    type: pattern
+    languages: [javascript]
+    cwe: CWE-915
+    severity: medium
+    patterns: ['\.(create|update|updateOne|findByIdAndUpdate|findOneAndUpdate|build|insert)\s*\(\s*(\{\s*\}\s*,\s*)?req\.body\s*[,)]', 'new\s+[A-Z]\w*\s*\(\s*req\.body\s*\)']
+    message: The whole request body is written to the model, letting callers set fields like role or isAdmin.
+    remediation: Pick allowed fields explicitly (e.g. const { name, email } = req.body).
+
+  # ---------------- Logging & errors (A09/A10:2025) ----------------
+  - id: argus.javascript.error.leak
+    name: Error details sent to the client
+    type: pattern
+    languages: [javascript]
+    cwe: CWE-209
+    severity: low
+    patterns: ['res\.(status\(\d+\)\.)?(send|json)\s*\(\s*(err|error|e|ex)(\.stack|\.message)?\s*\)', 'res\.(status\(\d+\)\.)?(send|json)\s*\(\s*\{[^}]*(stack|error)\s*:\s*(err|error|e)\.stack']
+    message: Exception details (messages, stack traces) are returned to the caller.
+    remediation: Log the error server-side and return a generic message.
+
+  - id: argus.javascript.log.sensitive
+    name: Sensitive value logged
+    type: pattern
+    languages: [javascript]
+    cwe: CWE-532
+    severity: medium
+    mode: hint
+    patterns: ['(console|logger|log)\.(log|info|debug|warn|error)\s*\(.*(?i:password|passwd|secret|token|apikey|api_key|ssn|card)']
+    message: Secrets or personal data may end up in logs.
+
+  - id: argus.javascript.postmessage
+    name: postMessage handler
+    type: pattern
+    languages: [javascript]
+    cwe: CWE-346
+    severity: medium
+    mode: hint
+    patterns: ['addEventListener\s*\(\s*["'']message["'']', 'onmessage\s*=']
+    message: Check event.origin before trusting message data.
+
+  # ---------------- Taint markers ----------------
+  - id: argus.javascript.source.request
+    name: Untrusted input
+    type: source
+    languages: [javascript]
+    patterns: ['\breq\.(params|query|body|headers|cookies|files|file|get\s*\()', 'location\.(hash|search|href|pathname)', 'document\.(URL|referrer|cookie|documentURI)', 'window\.name', '\bevent\.data\b', 'process\.argv']
+    message: Attacker-controlled data enters here.
+
+  - id: argus.javascript.sanitizer.common
+    name: Common encoders / safe APIs
+    type: sanitizer
+    languages: [javascript]
+    patterns: ['DOMPurify\.sanitize\s*\(', 'escapeHtml\s*\(', 'encodeURIComponent\s*\(', '\bvalidator\.\w+\s*\(', '\.textContent\s*=', 'sanitize-html|sanitizeHtml\s*\(', 'mongo-sanitize']
+    message: Output is encoded / validated here.

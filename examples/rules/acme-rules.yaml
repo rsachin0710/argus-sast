@@ -1,0 +1,75 @@
+# Example CUSTOM rules for an imaginary company, "Acme".
+#
+# Use them with:   argus scan ./src --rules examples/rules/acme-rules.yaml
+# or install them: cp examples/rules/acme-rules.yaml ~/.config/argus/rules/
+#
+# Every rule type is shown once. See README.md "Custom rules" for every field.
+version: 1
+rules:
+  # 1) PATTERN rule in REPORT mode: a regex match becomes a finding.
+  #    With AI enabled, the Verifier agent confirms or rejects it (verify: true).
+  - id: acme.java.legacy-crypto
+    name: Deprecated LegacyCrypto helper
+    type: pattern
+    languages: [java]
+    cwe: CWE-327
+    severity: high
+    patterns:
+      - 'LegacyCrypto\.(encrypt|decrypt)\s*\('
+    pattern-not:
+      - '//\s*approved-by-security'
+    message: LegacyCrypto uses single DES with a static key.
+    remediation: Use com.acme.crypto.CryptoService, which wraps AES-GCM with keys from KMS.
+    references: ['https://wiki.acme.example/security/crypto']
+    exclude: ['**/test/**']
+
+  # 2) PATTERN rule in HINT mode: no finding by itself; tells the AI where to look.
+  - id: acme.python.feature-flag-bypass
+    name: Security feature flag read from the request
+    type: pattern
+    mode: hint
+    languages: [python]
+    cwe: CWE-807
+    patterns:
+      - 'request\.(args|headers|cookies)\.get\(\s*["'']x-acme-(skip|disable)'
+    message: Security behaviour toggled by a client-controlled value.
+
+  # 3) SINK: your own dangerous wrapper, so the AI treats it like a raw SQL call.
+  - id: acme.python.run-raw-sql
+    name: Acme raw SQL helper
+    type: sink
+    languages: [python]
+    cwe: CWE-89
+    patterns: ['acme_db\.run_raw\s*\(']
+    message: run_raw() executes its argument as SQL without parameters.
+
+  # 4) SOURCE: an extra place untrusted data comes from.
+  - id: acme.javascript.partner-webhook
+    name: Partner webhook payload
+    type: source
+    languages: [javascript]
+    patterns: ['parsePartnerWebhook\s*\(']
+    message: Webhook bodies come from third parties and are untrusted.
+
+  # 5) SANITIZER: your approved encoder, so findings that pass through it are
+  #    less likely to be reported.
+  - id: acme.javascript.safe-html
+    name: Acme approved HTML sanitiser
+    type: sanitizer
+    languages: [javascript]
+    patterns: ['acmeSafeHtml\s*\(']
+    message: acmeSafeHtml() wraps DOMPurify with Acme's allowlist.
+
+  # 6) AI rule: a policy in plain English, added to every Hunter agent's checklist.
+  - id: acme.ai.tenant-isolation
+    name: Tenant isolation on data access
+    type: ai
+    languages: [java, python, javascript]
+    cwe: CWE-639
+    severity: high
+    instruction: >
+      Acme is multi-tenant. Every query or lookup on customer data must be scoped
+      to the tenant of the authenticated user (e.g. user.tenant_id / req.user.tenantId),
+      never to a tenant id taken from the URL, query string, body or headers.
+      Flag lookups by object id that are not scoped to the caller's tenant.
+    remediation: Add a tenant filter taken from the authenticated principal.

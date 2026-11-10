@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block title %}{{ run.target | short_target }} · Argus{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>{{ run.target | short_target }}</h1>
+    <p class="path-full">{{ run.target }}</p>
+    <div class="run-meta">
+      <span><b>{{ run.stats.files_scanned }}</b> files, {{ run.stats.lines_scanned }} lines</span>
+      <span>{% if run.ai_enabled %}<b>{{ run.provider }}: {{ run.model }}</b>, {{ run.settings.get('scan', {}).get('votes', '') }} votes{% else %}<b>Rules only</b>{% endif %}</span>
+      <span>OWASP Top 10:{{ run.owasp_edition }}</span>
+      {% if run.ai_enabled %}<span>{{ run.stats.llm_calls }} LLM calls, {{ run.stats.llm_cache_hits }} from cache</span>{% endif %}
+      <span class="mono">{{ run.id }}</span>
+    </div>
+  </div>
+  {% if run.status == 'completed' %}
+  <div class="actions">
+    <a class="btn small" href="/api/runs/{{ run.id }}/report/json">Download JSON</a>
+    <a class="btn small" href="/api/runs/{{ run.id }}/report/txt">Download text</a>
+    <a class="btn small" href="/api/runs/{{ run.id }}/report/sarif">Download SARIF</a>
+    <a class="btn small" href="/api/runs/{{ run.id }}/report/md">Download Markdown</a>
+  </div>
+  {% endif %}
+</div>
+
+<script type="application/json" id="run-data">{{ run_json | tojson }}</script>
+<script type="application/json" id="owasp-names">{{ owasp_names | tojson }}</script>
+
+{% if run.status in ['running', 'queued'] %}
+<section class="panel" id="live" data-run="{{ run.id }}">
+  <h2>Scanning</h2>
+  <p id="phase" aria-live="polite">{{ run.phase or 'Starting' }}</p>
+  <div class="progress" role="progressbar" aria-label="Scan progress"><span id="bar"></span></div>
+  <button class="btn small" id="cancel" type="button">Cancel scan</button>
+</section>
+{% elif run.status != 'completed' %}
+<div class="notice error" role="alert">
+  <b>This scan {{ run.status }}.</b>
+  {% for e in run.errors %}<p>{{ e }}</p>{% endfor %}
+</div>
+{% else %}
+  {% for w in run.warnings[:8] %}<div class="notice">{{ w }}</div>{% endfor %}
+  {% if not run.findings %}
+  <div class="panel empty"><h2>No findings</h2><p>Nothing in this scan matched a vulnerability Argus could confirm.</p></div>
+  {% else %}
+  <div class="triage">
+    <div>
+      <div class="filters" role="search">
+        <label class="sr-only" for="f-status">Status</label>
+        <select id="f-status">
+          <option value="active">Open (confirmed, needs input, unverified)</option>
+          <option value="confirmed">Confirmed</option>
+          <option value="needs_context">Needs your input</option>
+          <option value="unverified">Unverified</option>
+          <option value="rejected">Rejected by the verifier</option>
+          <option value="suppressed">Suppressed</option>
+          <option value="all">All</option>
+        </select>
+        <label class="sr-only" for="f-sev">Severity</label>
+        <select id="f-sev"><option value="">Any severity</option>{% for s in sev_order %}<option value="{{ s }}">{{ s }} and above</option>{% endfor %}</select>
+        <label class="sr-only" for="f-q">Search</label>
+        <input type="search" id="f-q" placeholder="Search title, file, CWE">
+      </div>
+      <ul class="flist" id="flist" role="listbox" aria-label="Findings"></ul>
+      <p class="muted" id="fcount"></p>
+    </div>
+    <article class="detail" id="detail" aria-live="polite"></article>
+  </div>
+  {% endif %}
+{% endif %}
+
+<dialog id="fix-dialog" aria-labelledby="fix-title">
+  <h2 id="fix-title">Apply this fix?</h2>
+  <p id="fix-file" class="mono"></p>
+  <p>Argus will back up the file as <code>.argus-bak</code> and replace only the lines shown. Nothing else changes.</p>
+  <div class="diff" id="fix-diff"></div>
+  <div class="field">
+    <label for="fix-confirm">Type <span class="mono" id="fix-id"></span> to confirm</label>
+    <input type="text" id="fix-confirm" autocomplete="off">
+  </div>
+  <div id="fix-error" class="notice error" hidden></div>
+  <div class="actions">
+    <button class="btn primary" id="fix-apply" type="button" disabled>Apply fix</button>
+    <button class="btn" id="fix-cancel" type="button">Keep code unchanged</button>
+  </div>
+</dialog>
+{% endblock %}
